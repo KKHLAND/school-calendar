@@ -1,0 +1,1071 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>학사일정</title>
+    
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+KR:wght@400;500;700&display=swap" rel="stylesheet">
+    
+    <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+    
+    <style>
+      /* Basic CSS Reset and Font Smoothing */
+      body {
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+      }
+    </style>
+
+    <script type="importmap">
+    {
+      "imports": {
+        "react-dom/client": "https://esm.sh/react-dom@18.2.0/client",
+        "react": "https://esm.sh/react@18.2.0",
+        "date-fns": "https://esm.sh/date-fns@3.6.0"
+      }
+    }
+    </script>
+
+    <script>
+      // Tailwind CSS Configuration - wait for tailwind to load
+      if (typeof tailwind !== 'undefined') {
+        tailwind.config = {
+          theme: {
+            extend: {
+              fontFamily: {
+                sans: ['Inter', 'Noto Sans KR', 'sans-serif'],
+              },
+            },
+          },
+        }
+      }
+    </script>
+</head>
+<body class="bg-slate-200 p-2 sm:p-4 lg:p-8 min-h-screen">
+    <div id="root"></div>
+
+    <script type="text/babel" data-type="module">
+        import React, { useState, useMemo, useCallback, useEffect } from 'react';
+        import ReactDOM from 'react-dom/client';
+        import {
+            eachDayOfInterval,
+            endOfMonth,
+            endOfWeek,
+            format,
+            isSameMonth,
+            isToday,
+            startOfMonth,
+            startOfWeek as dateFnsStartOfWeek
+        } from 'date-fns';
+
+        // --- START: data/schoolData.ts ---
+        const rawEventsCsv = ``;
+
+        const rawHolidaysCsv = ``;
+
+        const rawDutiesCsv = ``;
+        // --- END: data/schoolData.ts ---
+
+        // --- START: utils/dataProcessor.ts ---
+        const parseDate = (dateStr) => {
+            if (!dateStr) return null;
+            const cleanedDateStr = dateStr.replace(/\./g, '-').replace(/\s/g, '');
+            const parts = cleanedDateStr.split('-').filter(p => p);
+            if (parts.length === 3) {
+                const [year, month, day] = parts.map(p => parseInt(p, 10));
+                if (!isNaN(year) && !isNaN(month) && !isNaN(day)) {
+                    return new Date(year, month - 1, day);
+                }
+            }
+            return null;
+        };
+
+        const formatDateKey = (date) => {
+            return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+        };
+
+        const parseCsvLine = (line) => {
+            const fields = [];
+            let currentField = '';
+            let inQuotes = false;
+
+            for (const char of line) {
+                if (char === '"') {
+                    inQuotes = !inQuotes;
+                } else if (char === ',' && !inQuotes) {
+                    fields.push(currentField.trim());
+                    currentField = '';
+                } else {
+                    currentField += char;
+                }
+            }
+            fields.push(currentField.trim());
+            return fields.map(f => f.replace(/^"|"$/g, ''));
+        };
+
+        const parseEventsCsv = (csvText) => {
+            const lines = csvText.trim().split('\n').slice(1);
+            const events = [];
+            lines.forEach(line => {
+                const [date, ...eventParts] = parseCsvLine(line);
+                const eventStrings = eventParts.map(e => e.trim().replace(/"/g, '')).filter(e => e);
+                if (date && eventStrings.length > 0) {
+                    events.push({ date, events: eventStrings });
+                }
+            });
+            return events;
+        };
+
+        const parseHolidaysCsv = (csvText) => {
+            const lines = csvText.trim().split('\n').slice(1);
+            const holidays = [];
+            lines.forEach(line => {
+                const [dateStr, name] = line.split(',');
+                const date = parseDate(dateStr);
+                if (date && name) {
+                    holidays.push({ date, name: name.trim() });
+                }
+            });
+            return holidays;
+        };
+
+        const parseTeachersCsv = (csvText) => {
+            const lines = csvText.trim().split('\n').slice(1);
+            const duties = [];
+            lines.forEach(line => {
+                const [dateStr, _day, teacher] = line.split(',');
+                const date = parseDate(dateStr);
+                if (date && teacher && teacher.trim()) {
+                    duties.push({ date, teacher: teacher.trim() });
+                }
+            });
+            return duties;
+        };
+
+        const EVENT_COLORS = [
+            { bg: 'bg-sky-100', text: 'text-sky-800' },
+            { bg: 'bg-emerald-100', text: 'text-emerald-800' },
+            { bg: 'bg-amber-100', text: 'text-amber-800' },
+            { bg: 'bg-violet-100', text: 'text-violet-800' },
+            { bg: 'bg-rose-100', text: 'text-rose-800' },
+            { bg: 'bg-teal-100', text: 'text-teal-800' },
+            { bg: 'bg-indigo-100', text: 'text-indigo-800' },
+            { bg: 'bg-orange-100', text: 'text-orange-800' },
+        ];
+
+        const simpleHash = (str) => {
+          let hash = 0;
+          for (let i = 0; i < str.length; i++) {
+            const char = str.charCodeAt(i);
+            hash = (hash << 5) - hash + char;
+            hash |= 0; 
+          }
+          return Math.abs(hash);
+        };
+        
+        const getEventColor = (eventTitle) => {
+            const specialKeywords = {
+                '고사': 'bg-red-100 font-medium',
+                '평가': 'bg-red-100 font-medium',
+                '수능': 'bg-red-200 font-bold',
+                '방학': 'bg-blue-100',
+                '개학': 'bg-blue-100',
+                '졸업': 'bg-purple-100',
+                '입학': 'bg-purple-100',
+            };
+
+            for (const keyword in specialKeywords) {
+                if (eventTitle.includes(keyword)) {
+                    return specialKeywords[keyword];
+                }
+            }
+
+            const hash = simpleHash(eventTitle);
+            const color = EVENT_COLORS[hash % EVENT_COLORS.length];
+            return `${color.bg}`;
+        };
+
+        const findAndProcessMultiDayEvents = (dayDataMap) => {
+            const multiDayEvents = [];
+            const processedEventIds = new Set();
+
+            const sortedDates = Array.from(dayDataMap.keys()).sort();
+
+            for (const dateKey of sortedDates) {
+                const dayData = dayDataMap.get(dateKey);
+                if (!dayData) continue;
+
+                for (const event of dayData.events) {
+                    const eventId = `${dateKey}_${event.fullTitle}`;
+                    if (processedEventIds.has(eventId)) continue;
+
+                    const baseTitleMatch = event.fullTitle.match(/^(.*?)(\s*\d+일차|\s*\(\d+\)|1일차)?$/);
+                    const baseTitle = baseTitleMatch ? baseTitleMatch[1].trim() : event.fullTitle;
+                    
+                    if (!baseTitle) continue;
+
+                    let endDate = new Date(dayData.date);
+                    const currentRunEventIds = [eventId];
+
+                    let currentCheckDate = new Date(dayData.date);
+                    currentCheckDate.setDate(currentCheckDate.getDate() + 1);
+                    let nextDateKey = formatDateKey(currentCheckDate);
+
+                    while (dayDataMap.has(nextDateKey)) {
+                        const nextDayData = dayDataMap.get(nextDateKey);
+                        const nextDayEvent = nextDayData.events.find(e => {
+                             const nextBaseTitleMatch = e.fullTitle.match(/^(.*?)(\s*\d+일차|\s*\(\d+\))?$/);
+                             return nextBaseTitleMatch && nextBaseTitleMatch[1].trim() === baseTitle;
+                        });
+
+                        if (nextDayEvent) {
+                            endDate = new Date(nextDayData.date);
+                            currentRunEventIds.push(`${nextDateKey}_${nextDayEvent.fullTitle}`);
+                        } else {
+                            break;
+                        }
+                        currentCheckDate.setDate(currentCheckDate.getDate() + 1);
+                        nextDateKey = formatDateKey(currentCheckDate);
+                    }
+                    
+                    if (endDate > dayData.date) {
+                        multiDayEvents.push({
+                            id: `${baseTitle}_${formatDateKey(dayData.date)}`,
+                            start: dayData.date,
+                            end: endDate,
+                            title: baseTitle,
+                            color: getEventColor(event.fullTitle),
+                        });
+                        currentRunEventIds.forEach(id => processedEventIds.add(id));
+                    }
+                }
+            }
+            
+            const laneManagedEvents = [];
+            multiDayEvents.sort((a,b) => a.start.getTime() - b.start.getTime());
+
+            for (const event of multiDayEvents) {
+                let lane = 0;
+                while(true) {
+                    const conflictingEvent = laneManagedEvents.find(e => e.lane === lane && !(event.start > e.end || event.end < e.start));
+                    if (!conflictingEvent) {
+                        laneManagedEvents.push({ ...event, lane });
+                        break;
+                    }
+                    lane++;
+                }
+            }
+
+            return { multiDayEvents: laneManagedEvents, processedEventIds };
+        };
+
+
+        const processCalendarData = (rawEvents, holidays, duties) => {
+            const dayDataMap = new Map();
+
+            rawEvents.forEach(rawEvent => {
+                const date = parseDate(rawEvent.date);
+                if (date) {
+                    const key = formatDateKey(date);
+                    if (!dayDataMap.has(key)) {
+                        dayDataMap.set(key, { date, events: [], holiday: null, teacherDuty: null });
+                    }
+                    const dayData = dayDataMap.get(key);
+                    rawEvent.events.forEach(eventTitle => {
+                        dayData.events.push({
+                            title: eventTitle.length > 15 ? eventTitle.substring(0, 12) + '...' : eventTitle,
+                            fullTitle: eventTitle,
+                            color: getEventColor(eventTitle),
+                        });
+                    });
+                }
+            });
+
+            holidays.forEach(holiday => {
+                const key = formatDateKey(holiday.date);
+                if (!dayDataMap.has(key)) {
+                    dayDataMap.set(key, { date: holiday.date, events: [], holiday: null, teacherDuty: null });
+                }
+                dayDataMap.get(key).holiday = holiday;
+            });
+
+            duties.forEach(duty => {
+                const key = formatDateKey(duty.date);
+                if (!dayDataMap.has(key)) {
+                    dayDataMap.set(key, { date: duty.date, events: [], holiday: null, teacherDuty: null });
+                }
+                dayDataMap.get(key).teacherDuty = duty;
+            });
+
+            const { multiDayEvents, processedEventIds } = findAndProcessMultiDayEvents(dayDataMap);
+
+            for (const [key, dayData] of dayDataMap.entries()) {
+                dayData.events = dayData.events.filter(event => {
+                    const eventId = `${key}_${event.fullTitle}`;
+                    return !processedEventIds.has(eventId);
+                });
+            }
+
+            return { dayDataMap, multiDayEvents };
+        };
+        // --- END: utils/dataProcessor.ts ---
+
+        // --- START: components/EventModal.tsx ---
+        const XMarkIcon = (props) => (
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth="2" {...props}>
+              <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+            </svg>
+        );
+
+        const EventModal = ({ dayData, onClose }) => {
+            const { date, events, holiday, teacherDuty } = dayData;
+            
+            const formattedDate = `${date.getFullYear()}년 ${date.getMonth() + 1}월 ${date.getDate()}일`;
+
+            return (
+                <div 
+                    className="fixed inset-0 bg-black/50 z-50 flex justify-center items-center p-4"
+                    onClick={onClose}
+                >
+                    <div 
+                        className="bg-white rounded-lg shadow-xl w-full max-w-md max-h-[80vh] flex flex-col"
+                        onClick={(e) => e.stopPropagation()}
+                    >
+                        <header className="p-4 border-b border-slate-200 flex justify-between items-center">
+                            <h2 className="text-lg font-bold text-slate-800">{formattedDate}</h2>
+                            <button onClick={onClose} className="p-1 rounded-full text-slate-400 hover:bg-slate-100">
+                                <XMarkIcon />
+                            </button>
+                        </header>
+                        <div className="flex-grow p-4 overflow-y-auto space-y-4">
+                            {holiday && (
+                                <div>
+                                    <h3 className="font-semibold text-slate-700 text-sm mb-1 uppercase tracking-wider">공휴일</h3>
+                                    <div className="p-3 bg-red-50 border border-red-200 rounded-lg">
+                                        <p className="font-bold text-red-700">{holiday.name}</p>
+                                    </div>
+                                </div>
+                            )}
+                            {events.length > 0 && (
+                                <div>
+                                    <h3 className="font-semibold text-slate-700 text-sm mb-2 uppercase tracking-wider">학사 일정</h3>
+                                    <ul className="space-y-2">
+                                        {events.map((event, index) => (
+                                            <li key={index} className={`p-2 rounded-lg text-sm font-medium ${event.color} text-black`}>
+                                                {event.fullTitle}
+                                            </li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
+                             {teacherDuty && (
+                                 <div>
+                                    <h3 className="font-semibold text-slate-700 text-sm mb-1 uppercase tracking-wider">향학당 지도 교사</h3>
+                                    <div className="p-3 bg-slate-100 border border-slate-200 rounded-lg">
+                                        <p className="text-slate-800 font-medium">{teacherDuty.teacher}</p>
+                                    </div>
+                                </div>
+                            )}
+                            {!holiday && events.length === 0 && !teacherDuty && (
+                                 <div className="text-center py-10">
+                                    <p className="text-slate-500">이 날짜에는 등록된 일정이 없습니다.</p>
+                                 </div>
+                            )}
+                        </div>
+                         <footer className="p-3 bg-slate-50 border-t border-slate-200 text-right">
+                            <button 
+                                onClick={onClose}
+                                className="px-4 py-2 bg-slate-600 text-white text-sm font-semibold rounded-lg hover:bg-slate-700"
+                            >
+                                닫기
+                            </button>
+                        </footer>
+                    </div>
+                </div>
+            );
+        };
+        // --- END: components/EventModal.tsx ---
+
+        // --- START: components/Header.tsx ---
+        const ChevronLeftIcon = (props) => (
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} {...props}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
+            </svg>
+        );
+
+        const ChevronRightIcon = (props) => (
+            <svg xmlns="http://www.w3.org/2000/svg" className="h-5 w-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2} {...props}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M9 5l7 7-7 7" />
+            </svg>
+        );
+
+        const MiniCalendar = ({ date, startOfWeek }) => {
+            const monthStart = startOfMonth(date);
+            const monthEnd = endOfMonth(date);
+            const calendarStart = dateFnsStartOfWeek(monthStart, { weekStartsOn: startOfWeek });
+            const calendarEnd = endOfWeek(monthEnd, { weekStartsOn: startOfWeek });
+            const days = eachDayOfInterval({ start: calendarStart, end: calendarEnd });
+
+            let dayHeaders = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
+            if (startOfWeek === 1) {
+                dayHeaders.push(dayHeaders.shift());
+            }
+
+            return (
+                <div className="w-48">
+                    <h3 className="text-center font-semibold text-sm mb-2 text-slate-700">{format(date, 'MMMM yyyy')}</h3>
+                    <div className="grid grid-cols-7 text-center text-xs text-slate-500">
+                        {dayHeaders.map(day => <div key={Math.random()}>{day}</div>)}
+                    </div>
+                    <div className="grid grid-cols-7 text-center text-xs mt-1">
+                        {days.map(day => {
+                            const dayOfWeek = day.getDay();
+                            const isCurrentMonth = isSameMonth(day, date);
+
+                            let textColor = 'text-slate-600';
+                            if (!isCurrentMonth) {
+                                textColor = 'text-slate-300';
+                            } else if (dayOfWeek === 0) { // Sunday
+                                textColor = 'text-red-500';
+                            } else if (dayOfWeek === 6) { // Saturday
+                                textColor = 'text-blue-500';
+                            }
+
+                            return (
+                                <div
+                                    key={day.toString()}
+                                    className={`
+                                        w-6 h-4 flex items-center justify-center rounded-full
+                                        ${isToday(day) ? 'bg-blue-600 text-white' : textColor}
+                                    `}
+                                >
+                                    {format(day, 'd')}
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            );
+        };
+
+        const Header = ({ viewDate, setViewDate, startOfWeek, setStartOfWeek, onReset, onShowDataModal, schoolName, schoolLogo }) => {
+            const currentYear = viewDate.getFullYear();
+            const currentMonth = viewDate.getMonth();
+
+            const goToPreviousMonth = () => setViewDate(new Date(currentYear, currentMonth - 1, 1));
+            const goToNextMonth = () => setViewDate(new Date(currentYear, currentMonth + 1, 1));
+            const goToToday = () => setViewDate(new Date());
+
+            const prevMonth = new Date(currentYear, currentMonth - 1, 1);
+            const nextMonth = new Date(currentYear, currentMonth + 1, 1);
+            
+            const selectBaseClasses = "bg-white text-slate-700 text-sm border-gray-300 rounded-md shadow-sm focus:border-indigo-300 focus:ring focus:ring-indigo-200 focus:ring-opacity-50";
+            const buttonBaseClasses = `px-3 py-2 border border-gray-300 bg-white text-slate-700 text-sm font-medium rounded-md shadow-sm hover:bg-slate-50 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500`;
+
+            return (
+                <header className="bg-white shadow-sm sticky top-0 z-20">
+                     <div className="p-2 flex justify-between items-center gap-4">
+                        <div className="hidden lg:block">
+                            <MiniCalendar date={prevMonth} startOfWeek={startOfWeek} />
+                        </div>
+                        <div className="text-center p-4 sm:p-6 rounded-xl shadow-lg bg-gradient-to-r from-sky-500 to-indigo-600 text-white select-none flex-grow">
+                            <h1 className="text-2xl sm:text-3xl font-bold">스마트 스쿨 캘린더</h1>
+                            <p className="text-sm sm:text-base mt-1">{schoolName ? schoolName + " " : ""}학사 일정 관리 시스템</p>
+                        </div>
+                        <div className="hidden lg:block">
+                            <MiniCalendar date={nextMonth} startOfWeek={startOfWeek} />
+                        </div>
+                     </div>
+
+                    <div className="p-2 border-t border-slate-200 flex items-center justify-between flex-wrap gap-2">
+                         <div className="flex items-center gap-2 sm:gap-4">
+                            {schoolLogo ? (
+                                <img src={schoolLogo} alt="School Logo" className="h-10 sm:h-12 object-contain" />
+                            ) : (
+                                <span className="font-bold text-xl text-slate-700">🏫</span>
+                            )}
+                            <button onClick={goToToday} className={buttonBaseClasses}>
+                                오늘
+                            </button>
+                        </div>
+                        
+                        <div className="flex items-center absolute left-1/2 -translate-x-1/2">
+                            <button onClick={goToPreviousMonth} className="p-2 rounded-full text-slate-500 hover:bg-slate-100 transition-colors">
+                                <ChevronLeftIcon />
+                            </button>
+                            <h2 className="text-lg font-semibold text-slate-800 w-32 text-center">
+                                {`${currentYear}년 ${currentMonth + 1}월`}
+                            </h2>
+                            <button onClick={goToNextMonth} className="p-2 rounded-full text-slate-500 hover:bg-slate-100 transition-colors">
+                                <ChevronRightIcon />
+                            </button>
+                        </div>
+                        
+                        <div className="flex items-center gap-2">
+                            <select value={startOfWeek} onChange={(e) => setStartOfWeek(Number(e.target.value))} className={selectBaseClasses}>
+                                <option value={0}>일요일 시작</option>
+                                <option value={1}>월요일 시작</option>
+                            </select>
+                            <button 
+                                onClick={onShowDataModal}
+                                className="px-3 py-2 border border-gray-300 bg-blue-50 text-blue-700 text-sm font-medium rounded-md shadow-sm hover:bg-blue-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+                            >
+                                데이터 설정
+                            </button>
+                            {/* --- [FIX 2] START: 데이터 초기화 버튼 추가 --- */}
+                            <button 
+                                onClick={onReset}
+                                className="px-3 py-2 border border-gray-300 bg-red-50 text-red-700 text-sm font-medium rounded-md shadow-sm hover:bg-red-100 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-red-500"
+                            >
+                                데이터 초기화
+                            </button>
+                            {/* --- [FIX 2] END --- */}
+                        </div>
+                    </div>
+                </header>
+            );
+        };
+        // --- END: components/Header.tsx ---
+
+        // --- START: components/Calendar.tsx ---
+        const DayCell = ({ date, dayData, isToday, isCurrentMonth, reservedHeight, onClick }) => {
+            const dayNumber = date.getDate();
+            const dayOfWeek = date.getDay();
+
+            const dayNumberColor = dayData?.holiday ? 'text-red-500' :
+                dayOfWeek === 0 ? 'text-red-500' :
+                dayOfWeek === 6 ? 'text-blue-500' :
+                isCurrentMonth ? 'text-slate-700' : 'text-slate-400';
+
+            const hasContent = (dayData?.events.length ?? 0) > 0 || dayData?.holiday || dayData?.teacherDuty;
+
+            const MAX_ITEMS_IN_CELL = 3;
+            const singleDayEvents = dayData?.events || [];
+            const displayableItems = [];
+
+            if (dayData?.holiday) {
+                displayableItems.push({ type: 'holiday', content: dayData.holiday });
+            }
+            
+            singleDayEvents.forEach(event => {
+                if (displayableItems.length < MAX_ITEMS_IN_CELL) {
+                    displayableItems.push({ type: 'event', content: event });
+                }
+            });
+            
+            const totalItems = (dayData?.holiday ? 1 : 0) + singleDayEvents.length;
+            const hasMoreItems = totalItems > MAX_ITEMS_IN_CELL;
+            const moreItemsCount = totalItems - displayableItems.length;
+
+            return (
+                <div
+                    className={`border-b border-r border-slate-300 flex flex-col relative transition-all duration-200 ${isCurrentMonth ? 'bg-gradient-to-br from-white to-slate-50' : 'bg-gradient-to-br from-slate-50/80 to-slate-100/60'} ${hasContent ? 'cursor-pointer hover:shadow-md hover:border-blue-300' : 'hover:shadow-sm'}`}
+                    style={{
+                        boxShadow: isCurrentMonth 
+                            ? 'inset 1px 1px 0 rgba(255,255,255,0.9), inset -1px -1px 0 rgba(0,0,0,0.05), 0 3px 8px rgba(59,130,246,0.12)' 
+                            : 'inset 1px 1px 0 rgba(255,255,255,0.6), inset -1px -1px 0 rgba(0,0,0,0.02), 0 2px 4px rgba(0,0,0,0.05)',
+                    }}
+                    onClick={() => dayData && hasContent && onClick(dayData)}
+                >
+                    <div className="flex-shrink-0 p-1 text-center">
+                        <div className={`text-sm font-bold mx-auto transition-all duration-150 ${dayNumberColor} ${isToday ? 'bg-gradient-to-b from-blue-500 to-blue-700 text-white rounded-full w-7 h-7 flex items-center justify-center shadow-lg shadow-blue-400/40' : 'w-7 h-7 flex items-center justify-center'}`}
+                             style={!isToday && isCurrentMonth ? {
+                                textShadow: '0 1px 2px rgba(0,0,0,0.1)',
+                                fontWeight: '600'
+                             } : {}}>
+                            {dayNumber}
+                        </div>
+                    </div>
+                    <div className="flex-grow overflow-y-auto px-1 pb-1 space-y-1">
+                        <div style={{ height: reservedHeight }} aria-hidden="true" />
+                         {displayableItems.map((item, index) => {
+                            if (item.type === 'holiday') {
+                                return (
+                                     <div key={`item-${index}`} className="text-xs rounded px-1.5 py-0.5 whitespace-nowrap overflow-hidden text-ellipsis bg-gradient-to-b from-red-100 to-red-50 text-red-700 font-medium shadow-sm border border-red-200/50"
+                                          style={{boxShadow: '0 2px 4px rgba(239,68,68,0.15), inset 0 1px 0 rgba(255,255,255,0.8)'}}>
+                                        {item.content.name}
+                                    </div>
+                                )
+                            }
+                            if (item.type === 'event') {
+                                const event = item.content;
+                                return (
+                                    <div key={`item-${index}`} className={`text-xs rounded px-1.5 py-0.5 whitespace-nowrap overflow-hidden text-ellipsis ${event.color} text-black font-medium shadow-sm border border-opacity-30`}
+                                         style={{boxShadow: '0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.6)'}}>
+                                        {event.title}
+                                    </div>
+                                )
+                            }
+                            return null;
+                        })}
+                        {hasMoreItems && (
+                            <div className="text-xs text-slate-500 font-medium px-1.5 py-0.5">
+                                + {moreItemsCount} more
+                            </div>
+                        )}
+                    </div>
+                    {dayData?.teacherDuty && (
+                        <div className="flex-shrink-0 p-1 text-center text-xs font-medium text-slate-600 truncate border-t border-slate-200 mt-1 bg-gradient-to-r from-slate-50/50 to-slate-50"
+                             style={{boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.8)'}}>
+                            {dayData.teacherDuty.teacher}
+                        </div>
+                    )}
+                </div>
+            );
+        };
+
+        const Calendar = ({ viewDate, startOfWeek: startOfWeekProp, calendarData, onDayClick }) => {
+            const year = viewDate.getFullYear();
+            const month = viewDate.getMonth();
+
+            const firstDayOfMonth = new Date(year, month, 1);
+            const lastDayOfMonth = new Date(year, month + 1, 0);
+
+            const startDate = new Date(firstDayOfMonth);
+            const startDayOfWeek = firstDayOfMonth.getDay();
+            const diff = (startDayOfWeek - startOfWeekProp + 7) % 7;
+            startDate.setDate(startDate.getDate() - diff);
+
+            const endDate = new Date(lastDayOfMonth);
+            const endDayOfWeek = lastDayOfMonth.getDay();
+            const endDiff = (6 - (endDayOfWeek - startOfWeekProp + 7) % 7);
+            endDate.setDate(endDate.getDate() + endDiff);
+
+            const weeks = [];
+            let currentWeek = [];
+            let currentDate = new Date(startDate);
+            
+            while (currentDate <= endDate) {
+                currentWeek.push(new Date(currentDate));
+                if (currentWeek.length === 7) {
+                    weeks.push(currentWeek);
+                    currentWeek = [];
+                }
+                currentDate.setDate(currentDate.getDate() + 1);
+            }
+             if (currentWeek.length > 0) {
+                weeks.push(currentWeek);
+            }
+
+            const dayHeaders = ['일', '월', '화', '수', '목', '금', '토'];
+            if (startOfWeekProp === 1) {
+                dayHeaders.push(dayHeaders.shift());
+            }
+
+            const today = new Date();
+            const todayKey = formatDateKey(today);
+
+            const getWeekMultiDayEvents = (week) => {
+                if (!calendarData) return [];
+                const weekStart = week[0];
+                const weekEnd = week[6];
+                return calendarData.multiDayEvents.filter(event => 
+                    event.start <= weekEnd && event.end >= weekStart
+                );
+            }
+
+            const dayHeaderTopAreaHeight = '1.8rem';
+            const multiDayEventHeight = '1.4rem';
+
+            return (
+                <div className="border-t border-l border-slate-300 bg-white flex flex-col flex-grow shadow-lg rounded-xl overflow-hidden">
+                    <div className="grid grid-cols-7">
+                        {dayHeaders.map((day) => (
+                            <div key={day} className={`bg-blue-600 text-white text-center py-2 text-sm font-semibold border-r border-b border-blue-700`}>
+                                {day}
+                            </div>
+                        ))}
+                    </div>
+                    <div className="flex-grow grid" style={{gridTemplateRows: `repeat(${weeks.length}, minmax(0, 1fr))`}}>
+                        {weeks.map((week, weekIndex) => {
+                            const multiDayEventsInWeek = getWeekMultiDayEvents(week);
+                            const maxLanes = multiDayEventsInWeek.length > 0 ? Math.max(...multiDayEventsInWeek.map(e => e.lane)) + 1 : 0;
+                            const reservedHeight = `calc(${maxLanes} * ${multiDayEventHeight})`;
+
+                            return (
+                                <div key={weekIndex} className="grid grid-cols-7 relative border-b border-slate-300">
+                                    {multiDayEventsInWeek.map(event => {
+                                        const weekStart = new Date(week[0]);
+                                        weekStart.setHours(0,0,0,0);
+
+                                        const eventStart = new Date(event.start);
+                                        eventStart.setHours(0,0,0,0);
+                                        
+                                        const eventEnd = new Date(event.end);
+                                        eventEnd.setHours(0,0,0,0);
+
+                                        const startDayIndex = Math.max(0, Math.round((eventStart.getTime() - weekStart.getTime()) / (1000 * 3600 * 24)));
+                                        const endDayIndex = Math.min(6, Math.round((eventEnd.getTime() - weekStart.getTime()) / (1000 * 3600 * 24)));
+                                        
+                                        const startCol = startDayIndex;
+                                        const span = endDayIndex - startDayIndex + 1;
+                                        
+                                        if (span <= 0) return null;
+
+                                        return (
+                                            <div 
+                                                key={event.id}
+                                                className={`absolute text-xs p-1 rounded overflow-hidden text-ellipsis whitespace-nowrap ${event.color} text-black`}
+                                                style={{ 
+                                                    top: `calc(${dayHeaderTopAreaHeight} + ${event.lane} * ${multiDayEventHeight})`, 
+                                                    left: `calc(${(100 / 7) * startCol}% + 2px)`,
+                                                    width: `calc(${(100 / 7) * span}% - 4px)`,
+                                                    height: `calc(${multiDayEventHeight} - 2px)`,
+                                                    zIndex: 5
+                                                }}
+                                            >
+                                                {event.title}
+                                            </div>
+                                        )
+                                    })}
+
+                                    {week.map((date) => {
+                                        const dateKey = formatDateKey(date);
+                                        const dayData = calendarData?.dayDataMap.get(dateKey);
+                                        return (
+                                            <DayCell
+                                                key={dateKey}
+                                                date={date}
+                                                dayData={dayData}
+                                                isToday={dateKey === todayKey}
+                                                isCurrentMonth={date.getMonth() === month}
+                                                reservedHeight={reservedHeight}
+                                                onClick={onDayClick}
+                                            />
+                                        );
+                                    })}
+                                </div>
+                            );
+                        })}
+                    </div>
+                </div>
+            );
+        };
+        // --- END: components/Calendar.tsx ---
+
+        // --- START: App.tsx ---
+
+        // --- LocalStorage 관리 ---
+        const StorageManager = {
+            saveEvents: (csv) => localStorage.setItem('schoolEvents', csv),
+            saveHolidays: (csv) => localStorage.setItem('schoolHolidays', csv),
+            saveSpecialEvents: (csv) => localStorage.setItem('schoolSpecialEvents', csv),
+            saveSchoolName: (name) => localStorage.setItem('schoolName', name),
+            saveLogo: (logoData) => localStorage.setItem('schoolLogo', logoData),
+            removeLogo: () => localStorage.removeItem('schoolLogo'),
+            
+            getEvents: () => localStorage.getItem('schoolEvents'),
+            getHolidays: () => localStorage.getItem('schoolHolidays'),
+            getSpecialEvents: () => localStorage.getItem('schoolSpecialEvents'),
+            getSchoolName: () => localStorage.getItem('schoolName'),
+            getLogo: () => localStorage.getItem('schoolLogo'),
+            
+            hasData: () => localStorage.getItem('schoolName') !== null,
+            clearData: () => {
+                localStorage.removeItem('schoolEvents');
+                localStorage.removeItem('schoolHolidays');
+                localStorage.removeItem('schoolSpecialEvents');
+                localStorage.removeItem('schoolName');
+                localStorage.removeItem('schoolLogo');
+            }
+        };
+
+        // --- CSV 파일 업로드 모달 ---
+        // --- [FIX 3] START: onClose prop 받도록 수정 ---
+        const DataUploadModal = ({ onDataLoaded, onClose }) => {
+        // --- [FIX 3] END ---
+            const [schoolName, setSchoolName] = useState('');
+            const [events, setEvents] = useState(null);
+            const [holidays, setHolidays] = useState(null);
+            const [specialEvents, setSpecialEvents] = useState(null);
+            const [logo, setLogo] = useState(null);
+            const [uploadedFiles, setUploadedFiles] = useState({
+                events: false,
+                holidays: false,
+                specialEvents: false,
+                logo: false
+            });
+            const [error, setError] = useState('');
+
+            const handleFileChange = (e, type) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                if (type === 'logo') {
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        setLogo(event.target.result);
+                        setUploadedFiles(prev => ({...prev, logo: true}));
+                    };
+                    reader.readAsDataURL(file);
+                } else {
+                    const reader = new FileReader();
+                    reader.onload = (event) => {
+                        try {
+                            let text = event.target.result;
+                            if (text.charCodeAt(0) === 0xFEFF) {
+                                text = text.slice(1);
+                            }
+                            text = text.replace(/\r\n|\r/g, '\n');
+                            if (type === 'events') {
+                                setEvents(text);
+                            } else if (type === 'holidays') {
+                                setHolidays(text);
+                            } else if (type === 'specialEvents') {
+                                setSpecialEvents(text);
+                            }
+                            setUploadedFiles(prev => ({...prev, [type]: true}));
+                        } catch (err) {
+                            console.error('파일을 읽는 중 오류가 발생했습니다.');
+                        }
+                    };
+                    reader.readAsText(file);
+                }
+            }; // --- [FIX 1] START: 누락되었던 닫는 괄호 추가 ---
+               // --- [FIX 1] END ---
+
+            const handleRemoveLogo = () => {
+                setLogo(null);
+                setUploadedFiles(prev => ({...prev, logo: false}));
+                StorageManager.removeLogo();
+            };
+
+            const handleSubmit = () => {
+                if (!schoolName.trim()) {
+                    setError('학교명을 입력해주세요.');
+                    return;
+                }
+                StorageManager.saveSchoolName(schoolName);
+                StorageManager.saveEvents(events || '날짜,행사');
+                StorageManager.saveHolidays(holidays || '날짜,공휴일명');
+                StorageManager.saveSpecialEvents(specialEvents || '날짜,행사');
+                if (logo) {
+                    StorageManager.saveLogo(logo);
+                }
+                onDataLoaded({
+                    schoolName: schoolName,
+                    events: events || '날짜,행사',
+                    holidays: holidays || '날짜,공휴일명',
+                    specialEvents: specialEvents || '날짜,행사',
+                    logo: logo
+                });
+            };
+
+            return (
+                <div className="fixed inset-0 bg-black/50 z-50 flex justify-center items-center p-4">
+                    <div className="bg-white rounded-2xl shadow-2xl w-full max-w-2xl max-h-[90vh] overflow-y-auto p-6">
+                        <h1 className="text-3xl font-bold text-slate-800 mb-6">데이터 설정</h1>
+                        <div className="space-y-6">
+                            <div className="bg-slate-50 p-4 rounded-lg">
+                                <h2 className="font-semibold text-slate-800 mb-4">학교 정보</h2>
+                                <div className="mb-4">
+                                    <label className="block text-sm font-medium text-slate-700 mb-2">
+                                        학교명 * <span className="text-xs text-slate-500">(필수)</span>
+                                    </label>
+                                    <input 
+                                        type="text" 
+                                        placeholder="예: 원묵고등학교"
+                                        value={schoolName}
+                                        onChange={(e) => setSchoolName(e.target.value)}
+                                        maxLength={50}
+                                        className="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                    />
+                                </div>
+                                <div className="mb-4">
+                                    <label className="block text-sm font-medium text-slate-700 mb-2">
+                                        학교 로고 <span className="text-xs text-slate-500">(선택)</span>
+                                    </label>
+                                    <div className="flex items-center gap-2">
+                                        <input type="file" accept="image/*" onChange={(e) => handleFileChange(e, 'logo')} className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+                                        {uploadedFiles.logo && <span className="text-green-600 font-semibold">✓</span>}
+                                    </div>
+                                    {logo && (
+                                        <div className="mt-3 flex items-center gap-3">
+                                            <img src={logo} alt="School Logo" className="h-20 object-contain" />
+                                            <button onClick={handleRemoveLogo} className="px-3 py-2 bg-red-100 text-red-700 font-semibold rounded-lg hover:bg-red-200 transition-colors text-sm">삭제</button>
+                                        </div>
+                                    )}
+                                </div>
+                            </div>
+                            <div className="bg-slate-50 p-4 rounded-lg">
+                                <h2 className="font-semibold text-slate-800 mb-4">CSV 파일 업로드</h2>
+                                <div className="mb-4">
+                                    <label className="block text-sm font-medium text-slate-700 mb-2">
+                                        학사일정 CSV 파일 <span className="text-xs text-slate-500">(선택)</span>
+                                    </label>
+                                    <div className="flex items-center gap-2">
+                                        <input type="file" accept=".csv" onChange={(e) => handleFileChange(e, 'events')} className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+                                        {uploadedFiles.events && <span className="text-green-600 font-semibold">✓</span>}
+                                    </div>
+                                </div>
+                                <div className="mb-4">
+                                    <label className="block text-sm font-medium text-slate-700 mb-2">
+                                        공휴일 CSV 파일 <span className="text-xs text-slate-500">(선택)</span>
+                                    </label>
+                                    <div className="flex items-center gap-2">
+                                        <input type="file" accept=".csv" onChange={(e) => handleFileChange(e, 'holidays')} className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+                                        {uploadedFiles.holidays && <span className="text-green-600 font-semibold">✓</span>}
+                                    </div>
+                                </div>
+                                <div className="mb-4">
+                                    <label className="block text-sm font-medium text-slate-700 mb-2">
+                                        특별 행사 CSV 파일 <span className="text-xs text-slate-500">(선택)</span>
+                                    </label>
+                                    <div className="flex items-center gap-2">
+                                        <input type="file" accept=".csv" onChange={(e) => handleFileChange(e, 'specialEvents')} className="flex-1 px-3 py-2 border border-slate-300 rounded-lg text-sm" />
+                                        {uploadedFiles.specialEvents && <span className="text-green-600 font-semibold">✓</span>}
+                                    </div>
+                                </div>
+                            </div>
+                            {error && <div className="p-4 bg-red-100 border border-red-300 rounded-lg text-red-700 text-sm">{error}</div>}
+                            <div className="flex gap-3 pt-4">
+                                <button onClick={handleSubmit} className="flex-1 px-4 py-3 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition-colors">저장</button>
+                                {/* --- [FIX 3] START: onClick 핸들러를 onClose로 변경 --- */}
+                                <button onClick={onClose} className="flex-1 px-4 py-3 bg-slate-300 text-slate-700 font-semibold rounded-lg hover:bg-slate-400 transition-colors">
+                                    닫기
+                                </button>
+                                {/* --- [FIX 3] END --- */}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            );
+        };
+
+                const App = () => {
+            const [rawEventsCsv, setRawEventsCsv] = useState('');
+            const [rawHolidaysCsv, setRawHolidaysCsv] = useState('');
+            const [rawDutiesCsv, setRawDutiesCsv] = useState('');
+            const [schoolLogo, setSchoolLogo] = useState(null);
+            const [showDataModal, setShowDataModal] = useState(false);
+            const [viewDate, setViewDate] = useState(new Date());
+            const [startOfWeek, setStartOfWeek] = useState(0);
+            const [selectedDay, setSelectedDay] = useState(null);
+            const [schoolName, setSchoolName] = useState('');
+
+            const rawEvents = useMemo(() => parseEventsCsv(rawEventsCsv), [rawEventsCsv]);
+            const holidays = useMemo(() => parseHolidaysCsv(rawHolidaysCsv), [rawHolidaysCsv]);
+            const duties = useMemo(() => parseTeachersCsv(rawDutiesCsv), [rawDutiesCsv]);
+
+            const calendarData = useMemo(() => {
+                return processCalendarData(rawEvents, holidays, duties);
+            }, [rawEvents, holidays, duties]);
+
+            useEffect(() => {
+                // 로고 로드
+                const savedLogo = StorageManager.getLogo();
+                if (savedLogo) {
+                    setSchoolLogo(savedLogo);
+                }
+                
+                // 학교명 로드
+                const savedSchoolName = StorageManager.getSchoolName();
+                if (savedSchoolName) {
+                    setSchoolName(savedSchoolName);
+                    setShowDataModal(false);
+                } else {
+                    // 학교명이 없으면 모달을 띄움
+                    setShowDataModal(true);
+                }
+                
+                // 데이터 로드
+                const eventsCsv = StorageManager.getEvents();
+                const holidaysCsv = StorageManager.getHolidays();
+                const specialEventsCsv = StorageManager.getSpecialEvents();
+                if (typeof eventsCsv === 'string' && eventsCsv.trim().length > 0) {
+                    setRawEventsCsv(eventsCsv);
+                    setRawHolidaysCsv(holidaysCsv || '');
+                    setRawDutiesCsv(specialEventsCsv || '');
+                }
+            }, []);
+
+            const handleDataLoaded = (data) => {
+                setSchoolName(data.schoolName);
+                setRawEventsCsv(data.events);
+                setRawHolidaysCsv(data.holidays);
+                setRawDutiesCsv(data.specialEvents);
+                if (data.logo) {
+                    setSchoolLogo(data.logo);
+                }
+                setShowDataModal(false);
+            };
+
+            const handleReset = () => {
+                if (confirm('정말로 모든 데이터를 초기화하시겠습니까? (로고, 학교명, 학사일정 데이터가 모두 삭제됩니다)')) {
+                    StorageManager.clearData();
+                    setSchoolName('');
+                    setSchoolLogo(null);
+                    setRawEventsCsv('');
+                    setRawHolidaysCsv('');
+                    setRawDutiesCsv('');
+                    setShowDataModal(true);
+                }
+            };
+
+
+            const handleDayClick = useCallback((dayData) => {
+                if (dayData.events.length > 0 || dayData.holiday || dayData.teacherDuty) {
+                    setSelectedDay(dayData);
+                }
+            }, []);
+
+            return (
+                <div className="w-full bg-white rounded-2xl shadow-xl flex flex-col h-[94vh] overflow-hidden">
+                    <Header
+                        viewDate={viewDate}
+                        setViewDate={setViewDate}
+                        startOfWeek={startOfWeek}
+                        setStartOfWeek={setStartOfWeek}
+                        onReset={handleReset}
+                        onShowDataModal={() => setShowDataModal(true)}
+                        schoolName={schoolName}
+                        schoolLogo={schoolLogo}
+                    />
+                    <main className="flex-grow p-1 sm:p-2 lg:p-4 overflow-y-auto">
+                        <Calendar
+                            viewDate={viewDate}
+                            startOfWeek={startOfWeek}
+                            calendarData={calendarData}
+                            onDayClick={handleDayClick}
+                        />
+                    </main>
+                    <footer className="p-2 text-center text-xs text-slate-500 border-t border-slate-200">
+                        © 2025 KH KIM. All Rights Reserved.
+                    </footer>
+                    {selectedDay && (
+                        <EventModal dayData={selectedDay} onClose={() => setSelectedDay(null)} />
+                    )}
+                    {/* --- [FIX 3] START: onClose 핸들러 추가 --- */}
+                    {showDataModal && (
+                        <DataUploadModal 
+                            onDataLoaded={handleDataLoaded} 
+                            onClose={() => setShowDataModal(false)} 
+                        />
+                    )}
+                    {/* --- [FIX 3] END --- */}
+                </div>
+            );
+        };
+        // --- END: App.tsx ---
+
+        // --- START: index.tsx (Mounting Logic) ---
+        const rootElement = document.getElementById('root');
+        if (!rootElement) {
+          throw new Error("Could not find root element to mount to");
+        }
+
+        const root = ReactDOM.createRoot(rootElement);
+        root.render(
+          <React.StrictMode>
+            <App />
+          </React.StrictMode>
+        );
+        // --- END: index.tsx ---
+    </script>
+</body>
+</html>

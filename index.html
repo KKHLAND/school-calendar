@@ -46,7 +46,8 @@
       }
     </script>
 </head>
-<body class="bg-slate-200 p-2 sm:p-4 lg:p-8 min-h-screen">
+<!-- 1. 문서 배경을 bg-sky-200에서 그라데이션으로 변경 -->
+<body class="bg-gradient-to-br from-sky-200 to-blue-100 p-2 sm:p-4 lg:p-8 min-h-screen">
     <div id="root"></div>
 
     <script type="text/babel" data-type="module">
@@ -596,7 +597,7 @@
                                 const event = item.content;
                                 return (
                                     <div key={`item-${index}`} className={`text-xs rounded px-1.5 py-0.5 whitespace-nowrap overflow-hidden text-ellipsis ${event.color} text-black font-medium shadow-sm border border-opacity-30`}
-                                         style={{boxShadow: '0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.6)'}}>
+                                         style={{boxBoxShadow: '0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.6)'}}>
                                         {event.title}
                                     </div>
                                 )
@@ -925,7 +926,7 @@
                             {error && <div className="p-4 bg-red-100 border border-red-300 rounded-lg text-red-700 text-sm">{error}</div>}
                             <div className="flex gap-3 pt-4">
                                 <button onClick={handleSubmit} className="flex-1 px-4 py-3 bg-indigo-600 text-white font-semibold rounded-lg hover:bg-indigo-700 transition-colors">저장</button>
-                                {/* --- [FIX 3] START: onClick 핸들러를 onClose로 변경 --- */}
+                                {/* --- [FIX 3] START: onClose 핸들러 추가 --- */}
                                 <button onClick={onClose} className="flex-1 px-4 py-3 bg-slate-300 text-slate-700 font-semibold rounded-lg hover:bg-slate-400 transition-colors">
                                     닫기
                                 </button>
@@ -1015,8 +1016,8 @@
             }, []);
 
             return (
-                <div className="w-full bg-white rounded-2xl shadow-xl flex flex-col h-[94vh] overflow-hidden">
-                    <Header
+                <div className="w-full max-w-7xl mx-auto bg-white rounded-2xl shadow-xl flex flex-col min-h-[85vh] overflow-hidden">
+                     <Header
                         viewDate={viewDate}
                         setViewDate={setViewDate}
                         startOfWeek={startOfWeek}
@@ -1026,7 +1027,7 @@
                         schoolName={schoolName}
                         schoolLogo={schoolLogo}
                     />
-                    <main className="flex-grow p-1 sm:p-2 lg:p-4 overflow-y-auto">
+                    <main className="flex-grow p-1 sm:p-2 lg:p-4"> 
                         <Calendar
                             viewDate={viewDate}
                             startOfWeek={startOfWeek}

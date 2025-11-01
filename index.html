@@ -278,6 +278,258 @@
             return `${color.bg}`;
         };
 
+        // ========== 색상 검증 유틸리티 (Color Validation Utilities) ==========
+
+        /**
+         * Tailwind CSS 색상 클래스 형식 검증
+         * Validates Tailwind CSS color class format
+         *
+         * @param {string} className - 검증할 클래스명
+         * @returns {boolean} 유효한 Tailwind 색상 클래스인지 여부
+         */
+        const validateTailwindColorClass = (className) => {
+            if (!className || typeof className !== 'string') {
+                return false;
+            }
+
+            // Tailwind CSS 색상 패턴: bg-{color}-{shade} 또는 text-{color}-{shade}
+            // 유효한 색상: slate, gray, zinc, neutral, stone, red, orange, amber, yellow,
+            //            lime, green, emerald, teal, cyan, sky, blue, indigo, violet, purple,
+            //            fuchsia, pink, rose
+            const validColors = [
+                'slate', 'gray', 'zinc', 'neutral', 'stone', 'red', 'orange', 'amber',
+                'yellow', 'lime', 'green', 'emerald', 'teal', 'cyan', 'sky', 'blue',
+                'indigo', 'violet', 'purple', 'fuchsia', 'pink', 'rose'
+            ];
+
+            // 유효한 shade: 50, 100, 200, ..., 900, 950
+            const validShades = ['50', '100', '200', '300', '400', '500', '600', '700', '800', '900', '950'];
+
+            // 각 클래스를 공백으로 분리하여 검증
+            const classes = className.split(/\s+/).filter(c => c.length > 0);
+
+            for (const cls of classes) {
+                // bg- 또는 text-로 시작하는 색상 클래스만 검증
+                if (cls.startsWith('bg-') || cls.startsWith('text-')) {
+                    const match = cls.match(/^(bg|text)-([a-z]+)-(\d+)$/);
+                    if (!match) {
+                        // 색상 클래스가 올바른 형식이 아님
+                        return false;
+                    }
+
+                    const [, prefix, color, shade] = match;
+
+                    if (!validColors.includes(color)) {
+                        console.warn(`⚠️ 유효하지 않은 색상: ${color} (클래스: ${cls})`);
+                        return false;
+                    }
+
+                    if (!validShades.includes(shade)) {
+                        console.warn(`⚠️ 유효하지 않은 shade: ${shade} (클래스: ${cls})`);
+                        return false;
+                    }
+                }
+                // font-medium, font-bold 등의 유틸리티 클래스는 허용
+            }
+
+            return true;
+        };
+
+        /**
+         * 기본 색상 팔레트 검증
+         * Validates the base EVENT_COLORS palette
+         *
+         * @returns {Object} 검증 결과 { isValid, errors }
+         */
+        const validateEventColors = () => {
+            const errors = [];
+
+            // 1. EVENT_COLORS 배열이 존재하고 비어있지 않은지 확인
+            if (!EVENT_COLORS || !Array.isArray(EVENT_COLORS) || EVENT_COLORS.length === 0) {
+                errors.push('❌ EVENT_COLORS 배열이 정의되지 않았거나 비어있습니다.');
+                return { isValid: false, errors };
+            }
+
+            // 2. 각 색상 객체의 구조 검증
+            EVENT_COLORS.forEach((color, index) => {
+                if (!color.bg || !color.text) {
+                    errors.push(`❌ EVENT_COLORS[${index}]: bg 또는 text 속성이 누락되었습니다.`);
+                    return;
+                }
+
+                // 3. Tailwind 클래스 형식 검증
+                if (!validateTailwindColorClass(color.bg)) {
+                    errors.push(`❌ EVENT_COLORS[${index}].bg: 유효하지 않은 Tailwind 클래스입니다. (${color.bg})`);
+                }
+
+                if (!validateTailwindColorClass(color.text)) {
+                    errors.push(`❌ EVENT_COLORS[${index}].text: 유효하지 않은 Tailwind 클래스입니다. (${color.text})`);
+                }
+            });
+
+            // 4. 중복 색상 조합 확인
+            const colorSet = new Set();
+            EVENT_COLORS.forEach((color, index) => {
+                const colorKey = `${color.bg}|${color.text}`;
+                if (colorSet.has(colorKey)) {
+                    errors.push(`⚠️ EVENT_COLORS[${index}]: 중복된 색상 조합입니다. (${color.bg}, ${color.text})`);
+                }
+                colorSet.add(colorKey);
+            });
+
+            return {
+                isValid: errors.length === 0,
+                errors
+            };
+        };
+
+        /**
+         * 특수 키워드 색상 매핑 검증
+         * Validates special keyword color mappings in getEventColor
+         *
+         * @returns {Object} 검증 결과 { isValid, errors, warnings }
+         */
+        const validateSpecialKeywordColors = () => {
+            const errors = [];
+            const warnings = [];
+
+            // getEventColor 함수 내부의 specialKeywords를 재정의 (검증용)
+            const specialKeywords = {
+                '고사': 'bg-red-100 font-medium',
+                '평가': 'bg-red-100 font-medium',
+                '수능': 'bg-red-200 font-bold',
+                '방학': 'bg-blue-100',
+                '개학': 'bg-blue-100',
+                '졸업': 'bg-purple-100',
+                '입학': 'bg-purple-100',
+            };
+
+            // 1. 키워드가 비어있지 않은지 확인
+            const keywords = Object.keys(specialKeywords);
+            if (keywords.length === 0) {
+                warnings.push('⚠️ 특수 키워드가 정의되지 않았습니다.');
+            }
+
+            // 2. 각 키워드의 색상 클래스 검증
+            keywords.forEach(keyword => {
+                const colorClass = specialKeywords[keyword];
+
+                if (!colorClass || typeof colorClass !== 'string') {
+                    errors.push(`❌ 키워드 '${keyword}': 색상 클래스가 정의되지 않았습니다.`);
+                    return;
+                }
+
+                // Tailwind 클래스 형식 검증
+                if (!validateTailwindColorClass(colorClass)) {
+                    errors.push(`❌ 키워드 '${keyword}': 유효하지 않은 Tailwind 클래스입니다. (${colorClass})`);
+                }
+            });
+
+            // 3. 중복 색상 확인 및 그룹화
+            const colorGroups = {};
+            keywords.forEach(keyword => {
+                const colorClass = specialKeywords[keyword];
+                if (!colorGroups[colorClass]) {
+                    colorGroups[colorClass] = [];
+                }
+                colorGroups[colorClass].push(keyword);
+            });
+
+            // 동일한 색상을 사용하는 키워드 그룹 표시
+            Object.entries(colorGroups).forEach(([colorClass, keywordList]) => {
+                if (keywordList.length > 1) {
+                    warnings.push(`ℹ️ 동일한 색상 사용: [${keywordList.join(', ')}] → ${colorClass}`);
+                }
+            });
+
+            // 4. 색상 접근성 검사 (배경색이 너무 밝거나 어두운지)
+            keywords.forEach(keyword => {
+                const colorClass = specialKeywords[keyword];
+                // shade 50은 너무 밝고, 900/950은 너무 어두울 수 있음
+                if (colorClass.includes('-50')) {
+                    warnings.push(`⚠️ 키워드 '${keyword}': 배경색이 너무 밝을 수 있습니다. (${colorClass})`);
+                }
+                if (colorClass.includes('-900') || colorClass.includes('-950')) {
+                    warnings.push(`⚠️ 키워드 '${keyword}': 배경색이 너무 어두울 수 있습니다. (${colorClass})`);
+                }
+            });
+
+            return {
+                isValid: errors.length === 0,
+                errors,
+                warnings,
+                colorGroups
+            };
+        };
+
+        /**
+         * 전체 색상 설정 검증 및 보고
+         * Validates all color configurations and reports results
+         */
+        const validateColorConfiguration = () => {
+            console.group('🎨 달력 키워드 색상 검증 (Calendar Keyword Color Validation)');
+
+            let hasErrors = false;
+
+            // 1. 기본 색상 팔레트 검증
+            console.log('📋 기본 색상 팔레트 검증 중...');
+            const eventColorsResult = validateEventColors();
+
+            if (eventColorsResult.isValid) {
+                console.log(`✅ 기본 색상 팔레트: 정상 (${EVENT_COLORS.length}개 색상)`);
+                EVENT_COLORS.forEach((color, index) => {
+                    console.log(`   ${index + 1}. ${color.bg} + ${color.text}`);
+                });
+            } else {
+                hasErrors = true;
+                console.error('❌ 기본 색상 팔레트 검증 실패:');
+                eventColorsResult.errors.forEach(err => console.error(`   ${err}`));
+            }
+
+            console.log('');
+
+            // 2. 특수 키워드 색상 검증
+            console.log('📋 특수 키워드 색상 검증 중...');
+            const keywordResult = validateSpecialKeywordColors();
+
+            if (keywordResult.isValid) {
+                const keywordCount = Object.keys(keywordResult.colorGroups).length;
+                console.log(`✅ 특수 키워드 색상: 정상 (${keywordCount}개 고유 색상)`);
+
+                // 색상별로 그룹화하여 표시
+                Object.entries(keywordResult.colorGroups).forEach(([colorClass, keywords]) => {
+                    console.log(`   ${colorClass}`);
+                    keywords.forEach(keyword => {
+                        console.log(`      - ${keyword}`);
+                    });
+                });
+
+                // 경고 메시지 표시
+                if (keywordResult.warnings.length > 0) {
+                    console.log('');
+                    console.log('⚠️ 경고 사항:');
+                    keywordResult.warnings.forEach(warn => console.warn(`   ${warn}`));
+                }
+            } else {
+                hasErrors = true;
+                console.error('❌ 특수 키워드 색상 검증 실패:');
+                keywordResult.errors.forEach(err => console.error(`   ${err}`));
+            }
+
+            console.log('');
+
+            // 3. 최종 결과
+            if (hasErrors) {
+                console.error('❌ 색상 검증 실패: 위의 오류를 수정해주세요.');
+            } else {
+                console.log('✅ 모든 색상 검증 통과!');
+            }
+
+            console.groupEnd();
+
+            return !hasErrors;
+        };
+
         const findAndProcessMultiDayEvents = (dayDataMap) => {
             const multiDayEvents = [];
             const processedEventIds = new Set();
@@ -1176,6 +1428,10 @@
         // --- END: App.tsx ---
 
         // --- START: index.tsx (Mounting Logic) ---
+
+        // 색상 설정 검증 실행 (Run color validation)
+        validateColorConfiguration();
+
         const rootElement = document.getElementById('root');
         if (!rootElement) {
           throw new Error("Could not find root element to mount to");

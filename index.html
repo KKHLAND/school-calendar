@@ -154,25 +154,55 @@
         // --- END: data/schoolData.ts ---
 
         // --- START: utils/dataProcessor.ts ---
+        
+        /**
+         * [수정] YYYY-MM-DD, YYYY.MM.DD, MM/DD/YYYY 등 다양한 날짜 형식을 파싱하는 함수
+         */
         const parseDate = (dateStr) => {
             if (!dateStr) return null;
-            // .이나 공백을 -로 변환하고, yyyy-mm-dd 형식으로 파싱 시도
-            const cleanedDateStr = dateStr.replace(/\./g, '-').replace(/\s/g, '');
-            const parts = cleanedDateStr.split('-').filter(p => p);
+
+            // 1. Try YYYY-MM-DD or YYYY.MM.DD (Korean format)
+            // (Clean . and spaces)
+            let cleanedStr = dateStr.replace(/\./g, '-').replace(/\s/g, '');
+            let parts = cleanedStr.split('-').filter(p => p);
+            
             if (parts.length === 3) {
                 const [year, month, day] = parts.map(p => parseInt(p, 10));
-                if (!isNaN(year) && !isNaN(month) && !isNaN(day)) {
-                    // Date 객체는 month가 0부터 시작하므로 -1
-                    return new Date(year, month - 1, day);
+                //
+                if (!isNaN(year) && year > 1900 && !isNaN(month) && month >= 1 && month <= 12 && !isNaN(day) && day >= 1 && day <= 31) {
+                    return new Date(year, month - 1, day); // month is 0-indexed
                 }
             }
-            return null;
+
+            // 2. Try MM/DD/YYYY or MM.DD.YYYY (US format, common from Excel)
+            // (Clean . and spaces)
+            cleanedStr = dateStr.replace(/\./g, '/').replace(/\s/g, '');
+            parts = cleanedStr.split('/');
+            
+            if (parts.length === 3) {
+                const [month, day, year] = parts.map(p => parseInt(p, 10));
+                if (!isNaN(year) && year > 1900 && !isNaN(month) && month >= 1 && month <= 12 && !isNaN(day) && day >= 1 && day <= 31) {
+                    return new Date(year, month - 1, day); // month is 0-indexed
+                }
+            }
+            
+            // 3. Last resort: try native Date parser (can be unreliable but might work)
+            const date = new Date(dateStr);
+            if (date instanceof Date && !isNaN(date)) {
+                return date;
+            }
+
+            return null; // All attempts failed
         };
+
 
         const formatDateKey = (date) => {
             return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
         };
 
+        /**
+         * [수정] 따옴표로 묶인 필드(내부에 쉼표가 있을 수 있음)를 올바르게 파싱하는 함수
+         */
         const parseCsvLine = (line) => {
             const fields = [];
             let currentField = '';
@@ -197,8 +227,8 @@
             const lines = csvText.trim().split('\n').slice(1);
             const events = [];
             lines.forEach(line => {
+                if (!line.trim()) return; // 빈 줄 건너뛰기
                 const [date, ...eventParts] = parseCsvLine(line);
-                // 나머지 필드를 모두 이벤트 내용으로 간주하고 합침
                 const eventStrings = eventParts.map(e => e.trim().replace(/"/g, '')).filter(e => e);
                 if (date && eventStrings.length > 0) {
                     events.push({ date, events: eventStrings });
@@ -211,11 +241,11 @@
             const lines = csvText.trim().split('\n').slice(1);
             const holidays = [];
             lines.forEach(line => {
-                // 공휴일 CSV는 날짜, 공휴일명 두 필드만 있다고 가정
-                const [dateStr, name] = line.split(',').map(s => s.trim().replace(/^"|"$/g, ''));
+                if (!line.trim()) return; // 빈 줄 건너뛰기
+                const [dateStr, name] = parseCsvLine(line);
                 const date = parseDate(dateStr);
                 if (date && name) {
-                    holidays.push({ date, name });
+                    holidays.push({ date, name: name.trim() });
                 }
             });
             return holidays;
@@ -225,26 +255,32 @@
             const lines = csvText.trim().split('\n').slice(1);
             const duties = [];
             lines.forEach(line => {
-                 // 교사 CSV는 날짜, 요일(무시), 교사명 세 필드만 있다고 가정
-                const [dateStr, _day, teacher] = line.split(',').map(s => s.trim().replace(/^"|"$/g, ''));
+                if (!line.trim()) return; // 빈 줄 건너뛰기
+                const [dateStr, _day, teacher] = parseCsvLine(line);
                 const date = parseDate(dateStr);
-                if (date && teacher) {
-                    duties.push({ date, teacher });
+                if (date && teacher && teacher.trim()) {
+                    duties.push({ date, teacher: teacher.trim() });
                 }
             });
             return duties;
         };
 
+        // --- [FIX 1] START: 세련된 색상 팔레트로 변경 ---
         const EVENT_COLORS = [
-            { bg: 'bg-sky-100', text: 'text-sky-800' },
-            { bg: 'bg-emerald-100', text: 'text-emerald-800' },
-            { bg: 'bg-amber-100', text: 'text-amber-800' },
-            { bg: 'bg-violet-100', text: 'text-violet-800' },
-            { bg: 'bg-rose-100', text: 'text-rose-800' },
-            { bg: 'bg-teal-100', text: 'text-teal-800' },
-            { bg: 'bg-indigo-100', text: 'text-indigo-800' },
-            { bg: 'bg-orange-100', text: 'text-orange-800' },
+            // 밝은 파스텔톤 (어두운 글씨)
+            { bg: 'bg-sky-100', text: 'text-sky-900' },
+            { bg: 'bg-emerald-100', text: 'text-emerald-900' },
+            { bg: 'bg-amber-100', text: 'text-amber-900' },
+            { bg: 'bg-violet-100', text: 'text-violet-900' },
+            { bg: 'bg-rose-100', text: 'text-rose-900' },
+            { bg: 'bg-lime-100', text: 'text-lime-900' },
+            // 세련된 중간/어두운 톤 (흰색 글씨)
+            { bg: 'bg-indigo-500', text: 'text-white' },
+            { bg: 'bg-emerald-600', text: 'text-white' },
+            { bg: 'bg-pink-400', text: 'text-white' },
+            { bg: 'bg-orange-500', text: 'text-white' }
         ];
+        // --- [FIX 1] END ---
 
         const simpleHash = (str) => {
           let hash = 0;
@@ -257,25 +293,63 @@
         };
         
         const getEventColor = (eventTitle) => {
+            
+            // --- [MODIFIED] START: 자율/동아리 활동 우선 검사 ---
+            // '평가'보다 우선순위를 높이기 위해 이 블록을 위로 이동
+            const activityKeywords = ['자율', '적응', '동아리', '봉사'];
+            const activityColor = 'bg-teal-500 text-white'; // 세련된 녹색(청록색)
+            
+            for (const keyword of activityKeywords) {
+                if (eventTitle.includes(keyword)) {
+                    return activityColor;
+                }
+            }
+            // --- [MODIFIED] END ---
+
+            // --- [수정된 부분] START: 평가/고사/수능 키워드 색상 통일 ---
             const specialKeywords = {
-                '고사': 'bg-red-100 font-medium',
-                '평가': 'bg-red-100 font-medium',
-                '수능': 'bg-red-200 font-bold',
-                '방학': 'bg-blue-100',
-                '개학': 'bg-blue-100',
-                '졸업': 'bg-purple-100',
-                '입학': 'bg-purple-100',
+                '고사': 'bg-red-500 text-white font-bold',
+                '평가': 'bg-red-500 text-white font-bold',
+                '시험': 'bg-red-500 text-white font-bold', // 키워드 추가
+                '방학': 'bg-blue-500 text-white',
+                '개학': 'bg-blue-500 text-white',
+                '졸업': 'bg-purple-500 text-white',
+                '입학': 'bg-purple-500 text-white',
             };
+            // --- [수정된 부분] END ---
 
             for (const keyword in specialKeywords) {
                 if (eventTitle.includes(keyword)) {
                     return specialKeywords[keyword];
                 }
             }
+            
+            // --- [NEW FIX] START: 주제별 키워드 색상 통일 (인문, 과학 등) ---
+            const themedKeywords = [
+                { keywords: ['인문', '독서'], color: 'bg-purple-600 text-white' },
+                { keywords: ['과학'], color: 'bg-blue-600 text-white' },
+                { keywords: ['예술', '미술', '음악'], color: 'bg-rose-500 text-white' },
+                { keywords: ['체육', '스포츠', '수련회'], color: 'bg-lime-600 text-white' },
+                // --- [키워드 색상 변경] START: orange -> yellow ---
+                { keywords: ['교원', '교직원회의', '연수', '협의회'], color: 'bg-yellow-500 text-white' }
+                // --- [키워드 색상 변경] END ---
+            ];
+    
+            for (const theme of themedKeywords) {
+                for (const keyword of theme.keywords) {
+                    if (eventTitle.includes(keyword)) {
+                        return theme.color;
+                    }
+                }
+            }
+            // --- [NEW FIX] END ---
 
             const hash = simpleHash(eventTitle);
             const color = EVENT_COLORS[hash % EVENT_COLORS.length];
-            return `${color.bg}`;
+            
+            // --- [FIX 3] START: 배경색과 글자색을 함께 반환 ---
+            return `${color.bg} ${color.text}`;
+            // --- [FIX 3] END ---
         };
 
         const findAndProcessMultiDayEvents = (dayDataMap) => {
@@ -456,7 +530,8 @@
                                     <h3 className="font-semibold text-slate-700 text-sm mb-2 uppercase tracking-wider">학사 일정</h3>
                                     <ul className="space-y-2">
                                         {events.map((event, index) => (
-                                            <li key={index} className={`p-2 rounded-lg text-sm font-medium ${event.color} text-black`}>
+                                            // 모달 내부는 가독성을 위해 event.color를 사용
+                                            <li key={index} className={`p-2 rounded-lg text-sm font-medium ${event.color.startsWith('bg-') ? event.color : 'bg-slate-100'} ${event.color.includes('text-white') ? 'text-white' : 'text-black'}`}>
                                                 {event.fullTitle}
                                             </li>
                                         ))}
@@ -645,20 +720,30 @@
             const MAX_ITEMS_IN_CELL = 3;
             const singleDayEvents = dayData?.events || [];
             const displayableItems = [];
-
+            
+            // 공휴일이 있으면 항상 첫 번째 항목으로 추가 (우선순위 부여)
+            let remainingSlots = MAX_ITEMS_IN_CELL;
+            
             if (dayData?.holiday) {
                 displayableItems.push({ type: 'holiday', content: dayData.holiday });
+                remainingSlots--;
             }
             
+            // 나머지 이벤트 항목을 남은 슬롯 내에서만 추가
             singleDayEvents.forEach(event => {
-                if (displayableItems.length < MAX_ITEMS_IN_CELL) {
+                if (remainingSlots > 0) {
                     displayableItems.push({ type: 'event', content: event });
+                    remainingSlots--;
                 }
             });
             
+            // 전체 항목 수 (공휴일 + 모든 이벤트)
             const totalItems = (dayData?.holiday ? 1 : 0) + singleDayEvents.length;
-            const hasMoreItems = totalItems > MAX_ITEMS_IN_CELL;
-            const moreItemsCount = totalItems - displayableItems.length;
+            // 표시된 항목 수
+            const displayedCount = displayableItems.length;
+            // 더보기 항목 수
+            const moreItemsCount = totalItems - displayedCount;
+            const hasMoreItems = moreItemsCount > 0;
 
             return (
                 <div
@@ -693,12 +778,14 @@
                             }
                             if (item.type === 'event') {
                                 const event = item.content;
+                                // --- [FIX 4] START: 하드코딩된 'text-black' 제거 ---
                                 return (
-                                    <div key={`item-${index}`} className={`text-xs rounded px-1.5 py-0.5 whitespace-nowrap overflow-hidden text-ellipsis ${event.color} text-black font-medium shadow-sm border border-opacity-30`}
+                                    <div key={`item-${index}`} className={`text-xs rounded px-1.5 py-0.5 whitespace-nowrap overflow-hidden text-ellipsis ${event.color} font-medium shadow-sm border border-opacity-30`}
                                          style={{boxShadow: '0 2px 4px rgba(0,0,0,0.1), inset 0 1px 0 rgba(255,255,255,0.6)'}}>
                                         {event.title}
                                     </div>
                                 )
+                                // --- [FIX 4] END ---
                             }
                             return null;
                         })}
@@ -816,10 +903,11 @@
                                         
                                         if (span <= 0) return null;
 
+                                        // --- [FIX 5] START: 하드코딩된 'text-black' 제거 (연속 일정) ---
                                         return (
                                             <div 
                                                 key={event.id}
-                                                className={`absolute text-xs p-1 rounded overflow-hidden text-ellipsis whitespace-nowrap ${event.color} text-black font-semibold shadow-md`}
+                                                className={`absolute text-xs p-1 rounded overflow-hidden text-ellipsis whitespace-nowrap ${event.color} font-semibold shadow-md`}
                                                 style={{ 
                                                     top: `calc(${dayHeaderTopAreaHeight} + ${event.lane} * ${multiDayEventHeight})`, 
                                                     left: `calc(${(100 / 7) * startCol}% + 2px)`,
@@ -831,6 +919,7 @@
                                                 {event.title}
                                             </div>
                                         )
+                                        // --- [FIX 5] END ---
                                     })}
 
                                     {/* 개별 날짜 셀 */}
@@ -962,7 +1051,7 @@
                 // 파일이 업로드되지 않은 경우 기본 CSV 헤더를 저장
                 StorageManager.saveEvents(events || '날짜,행사');
                 StorageManager.saveHolidays(holidays || '날짜,공휴일명');
-                StorageManager.saveSpecialEvents(specialEvents || '날짜,행사');
+                StorageManager.saveSpecialEvents(specialEvents || '날짜,요일,행사명');
                 if (logo) {
                     StorageManager.saveLogo(logo);
                 }
@@ -970,7 +1059,7 @@
                     schoolName: schoolName,
                     events: events || '날짜,행사',
                     holidays: holidays || '날짜,공휴일명',
-                    specialEvents: specialEvents || '날짜,행사',
+                    specialEvents: specialEvents || '날짜,요일,행사명',
                     logo: logo
                 });
             };
@@ -1100,11 +1189,12 @@
                 const eventsCsv = StorageManager.getEvents();
                 const holidaysCsv = StorageManager.getHolidays();
                 const specialEventsCsv = StorageManager.getSpecialEvents();
-                if (typeof eventsCsv === 'string' && eventsCsv.trim().length > 0) {
-                    setRawEventsCsv(eventsCsv);
-                    setRawHolidaysCsv(holidaysCsv || '');
-                    setRawDutiesCsv(specialEventsCsv || '');
-                }
+
+                // [수정] 각 데이터를 LocalStorage에서 독립적으로 로드합니다.
+                setRawEventsCsv(eventsCsv || '');
+                setRawHolidaysCsv(holidaysCsv || '');
+                setRawDutiesCsv(specialEventsCsv || '');
+                
             }, []);
 
             const handleDataLoaded = (data) => {
@@ -1191,3 +1281,4 @@
     </script>
 </body>
 </html>
+
